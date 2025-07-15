@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitHub Commit Scraper</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom font for Inter */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6; /* Light gray background */
+        }
+        /* Simple spinner for loading state */
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left-color: #6366f1; /* Indigo */
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-4">
+    <div class="bg-white p-8 rounded-xl shadow-lg w-full max-w-2xl">
+        <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">GitHub Commit Scraper</h1>
+
+        <!-- Input Section -->
+        <div class="mb-6">
+            <label for="repoUrl" class="block text-gray-700 text-sm font-medium mb-2">GitHub Repository URL:</label>
+            <input type="url" id="repoUrl" placeholder="e.g., https://github.com/octocat/Spoon-Knife"
+                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition duration-200 ease-in-out">
+            <p class="text-xs text-gray-500 mt-1">Example: `https://github.com/owner/repo-name`</p>
+        </div>
+
+        <div class="mb-6">
+            <label for="commitCount" class="block text-gray-700 text-sm font-medium mb-2">Number of Commits to Fetch (Max 100):</label>
+            <input type="number" id="commitCount" value="30" min="1" max="100"
+                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition duration-200 ease-in-out">
+        </div>
+
+        <button id="fetchCommitsBtn"
+                class="w-full bg-indigo-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition duration-200 ease-in-out flex items-center justify-center">
+            <span id="fetchBtnText">Fetch Commits</span>
+            <div id="fetchSpinner" class="spinner ml-3 hidden"></div>
+        </button>
+
+        <!-- Message Display -->
+        <div id="message" class="mt-4 p-3 rounded-lg text-sm hidden" role="alert"></div>
+
+        <!-- Export Section -->
+        <div id="exportSection" class="mt-8 pt-6 border-t border-gray-200 hidden">
+            <h2 class="text-2xl font-semibold text-gray-800 mb-4">Export Commit Data</h2>
+
+            <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-medium mb-2">Select Export Format:</label>
+                <div class="flex space-x-4">
+                    <label class="inline-flex items-center">
+                        <input type="radio" name="exportFormat" value="csv" checked
+                               class="form-radio text-indigo-600 h-4 w-4">
+                        <span class="ml-2 text-gray-700">CSV (.csv)</span>
+                    </label>
+                    <label class="inline-flex items-center">
+                        <input type="radio" name="exportFormat" value="txt"
+                               class="form-radio text-indigo-600 h-4 w-4">
+                        <span class="ml-2 text-gray-700">Plain Text (.txt)</span>
+                    </label>
+                </div>
+            </div>
+
+            <button id="downloadDataBtn"
+                    class="w-full bg-green-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition duration-200 ease-in-out">
+                Download Data
+            </button>
+
+            <div id="textOutputArea" class="mt-6 hidden">
+                <label for="rawTextOutput" class="block text-gray-700 text-sm font-medium mb-2">Copy & Paste for PDF/DOC:</label>
+                <textarea id="rawTextOutput" rows="15" readonly
+                          class="w-full p-4 border border-gray-300 rounded-lg bg-gray-50 text-gray-800 text-sm resize-y"></textarea>
+                <p class="text-xs text-gray-500 mt-2">For PDF or DOC formats, copy the text above and paste it into a document editor (like Word, Google Docs, or LibreOffice Writer), then save it in your desired format.</p>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const repoUrlInput = document.getElementById('repoUrl');
+        // Removed githubTokenInput as per request
+        const commitCountInput = document.getElementById('commitCount');
+        const fetchCommitsBtn = document.getElementById('fetchCommitsBtn');
+        const fetchBtnText = document.getElementById('fetchBtnText');
+        const fetchSpinner = document.getElementById('fetchSpinner');
+        const messageDiv = document.getElementById('message');
+        const exportSection = document.getElementById('exportSection');
+        const downloadDataBtn = document.getElementById('downloadDataBtn');
+        const textOutputArea = document.getElementById('textOutputArea');
+        const rawTextOutput = document.getElementById('rawTextOutput');
+
+        let commitsData = []; // Store fetched commits
+
+        // Function to display messages
+        function showMessage(text, type = 'info') {
+            messageDiv.textContent = text;
+            messageDiv.classList.remove('hidden', 'bg-red-100', 'text-red-700', 'bg-green-100', 'text-green-700', 'bg-blue-100', 'text-blue-700');
+            if (type === 'error') {
+                messageDiv.classList.add('bg-red-100', 'text-red-700');
+            } else if (type === 'success') {
+                messageDiv.classList.add('bg-green-100', 'text-green-700');
+            } else {
+                messageDiv.classList.add('bg-blue-100', 'text-blue-700');
+            }
+            messageDiv.classList.remove('hidden');
+        }
+
+        // Function to hide messages
+        function hideMessage() {
+            messageDiv.classList.add('hidden');
+        }
+
+        // Function to toggle loading state for GitHub fetch
+        function setLoading(isLoading) {
+            fetchCommitsBtn.disabled = isLoading;
+            if (isLoading) {
+                fetchBtnText.textContent = 'Fetching...';
+                fetchSpinner.classList.remove('hidden');
+            } else {
+                fetchBtnText.textContent = 'Fetch Commits';
+                fetchSpinner.classList.add('hidden');
+            }
+        }
+
+        // Function to parse GitHub URL
+        function parseGitHubUrl(url) {
+            try {
+                const urlObj = new URL(url);
+                const pathParts = urlObj.pathname.split('/').filter(part => part !== '');
+                if (pathParts.length >= 2 && pathParts[0] && pathParts[1]) {
+                    return { owner: pathParts[0], repo: pathParts[1] };
+                }
+            } catch (e) {
+                // Invalid URL
+            }
+            return null;
+        }
+
+        // Function to fetch commits from GitHub API
+        async function fetchCommits() {
+            hideMessage();
+            setLoading(true);
+            commitsData = []; // Clear previous data
+            exportSection.classList.add('hidden');
+            textOutputArea.classList.add('hidden');
+
+            const repoUrl = repoUrlInput.value.trim();
+            // githubToken is no longer used
+            const requestedCommitCount = parseInt(commitCountInput.value, 10);
+
+            if (!repoUrl) {
+                showMessage('Please enter a GitHub repository URL.', 'error');
+                setLoading(false);
+                return;
+            }
+
+            const repoInfo = parseGitHubUrl(repoUrl);
+            if (!repoInfo) {
+                showMessage('Invalid GitHub repository URL. Please use the format: https://github.com/owner/repo-name', 'error');
+                setLoading(false);
+                return;
+            }
+
+            const { owner, repo } = repoInfo;
+            const perPage = Math.min(requestedCommitCount, 100); // GitHub API max per_page is 100
+            const pagesToFetch = Math.ceil(requestedCommitCount / perPage);
+
+            try {
+                for (let page = 1; page <= pagesToFetch; page++) {
+                    const apiUrl = `https://api.github.com/repos/${owner}/${repo}/commits?per_page=${perPage}&page=${page}`;
+                    const headers = {
+                        'Accept': 'application/vnd.github.v3+json'
+                    };
+                    // Removed Authorization header as per request
+                    const response = await fetch(apiUrl, { headers: headers });
+
+                    if (!response.ok) {
+                        if (response.status === 403 && response.headers.get('X-RateLimit-Remaining') === '0') {
+                            const resetTime = new Date(parseInt(response.headers.get('X-RateLimit-Reset')) * 1000);
+                            showMessage(`GitHub API rate limit exceeded. Please wait until ${resetTime.toLocaleTimeString()}.`, 'error');
+                        } else if (response.status === 404) {
+                            showMessage(`Repository not found: ${owner}/${repo}. Please check the URL.`, 'error');
+                        } else {
+                            const errorData = await response.json();
+                            showMessage(`Error fetching commits: ${errorData.message || response.statusText}`, 'error');
+                        }
+                        return; // Stop fetching on error
+                    }
+
+                    const data = await response.json();
+                    if (data.length === 0) {
+                        // No more commits on this page
+                        break;
+                    }
+                    commitsData = commitsData.concat(data);
+
+                    if (commitsData.length >= requestedCommitCount) {
+                        commitsData = commitsData.slice(0, requestedCommitCount); // Trim to requested count
+                        break;
+                    }
+                }
+
+                if (commitsData.length > 0) {
+                    showMessage(`Successfully fetched ${commitsData.length} commits.`, 'success');
+                    exportSection.classList.remove('hidden');
+                } else {
+                    showMessage('No commits found for this repository or an issue occurred.', 'info');
+                }
+
+            } catch (error) {
+                console.error('Fetch error:', error);
+                showMessage(`An unexpected error occurred: ${error.message}`, 'error');
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        // Function to format data for CSV
+        function formatToCsv(data) {
+            const headers = ["SHA", "Author Name", "Author Email", "Date", "Message", "Commit URL"];
+            const rows = data.map(commit => {
+                const sha = commit.sha;
+                const authorName = commit.commit.author.name;
+                const authorEmail = commit.commit.author.email;
+                const date = new Date(commit.commit.author.date).toLocaleString();
+                // Escape double quotes in message and wrap in quotes
+                const message = `"${commit.commit.message.replace(/"/g, '""')}"`;
+                const commitUrl = commit.html_url;
+                return `${sha},"${authorName}","${authorEmail}",${date},${message},${commitUrl}`;
+            });
+            return [headers.join(','), ...rows].join('\n');
+        }
+
+        // Function to format data for TXT
+        function formatToTxt(data) {
+            let text = `GitHub Commit Data\n`;
+            text += `Repository: ${parseGitHubUrl(repoUrlInput.value)?.owner}/${parseGitHubUrl(repoUrlInput.value)?.repo}\n`;
+            text += `Fetched: ${new Date().toLocaleString()}\n`;
+            text += `Total Commits: ${data.length}\n\n`;
+
+            data.forEach((commit, index) => {
+                text += `--- Commit #${index + 1} ---\n`;
+                text += `SHA: ${commit.sha}\n`;
+                text += `Author: ${commit.commit.author.name} <${commit.commit.author.email}>\n`;
+                text += `Date: ${new Date(commit.commit.author.date).toLocaleString()}\n`;
+                text += `Message:\n${commit.commit.message}\n`;
+                text += `URL: ${commit.html_url}\n\n`;
+            });
+            return text;
+        }
+
+        // Function to download data
+        function downloadData() {
+            if (commitsData.length === 0) {
+                showMessage('No commit data to download. Please fetch commits first.', 'info');
+                return;
+            }
+
+            const selectedFormat = document.querySelector('input[name="exportFormat"]:checked').value;
+            let fileContent;
+            let fileName;
+            let mimeType;
+
+            if (selectedFormat === 'csv') {
+                fileContent = formatToCsv(commitsData);
+                fileName = 'github_commits.csv';
+                mimeType = 'text/csv';
+                textOutputArea.classList.add('hidden'); // Hide text area for CSV
+            } else if (selectedFormat === 'txt') {
+                fileContent = formatToTxt(commitsData);
+                fileName = 'github_commits.txt';
+                mimeType = 'text/plain';
+                rawTextOutput.value = fileContent; // Populate text area
+                textOutputArea.classList.remove('hidden'); // Show text area for TXT
+            }
+
+            const blob = new Blob([fileContent], { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            showMessage(`Data downloaded as ${fileName}!`, 'success');
+        }
+
+        // Event Listeners
+        fetchCommitsBtn.addEventListener('click', fetchCommits);
+        downloadDataBtn.addEventListener('click', downloadData);
+
+        // Hide text output area initially when format changes
+        document.querySelectorAll('input[name="exportFormat"]').forEach(radio => {
+            radio.addEventListener('change', () => {
+                if (radio.value !== 'txt') {
+                    textOutputArea.classList.add('hidden');
+                } else {
+                    // If TXT is selected and data is available, show it
+                    if (commitsData.length > 0) {
+                        rawTextOutput.value = formatToTxt(commitsData);
+                        textOutputArea.classList.remove('hidden');
+                    }
+                }
+            });
+        });
+
+        // Optional: Pre-fill with a public repo for easy testing
+        repoUrlInput.value = 'https://github.com/twbs/bootstrap';
+
+    </script>
+</body>
+</html>
